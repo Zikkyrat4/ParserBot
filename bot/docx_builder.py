@@ -14,6 +14,7 @@ from docx.oxml import OxmlElement
 
 from bot.converter import (
     Block, HeadingBlock, ParagraphBlock, ListBlock, CodeBlock, TableBlock,
+    ImageBlock, BlockquoteBlock,
     Run, Metadata,
 )
 from bot.styles import (
@@ -106,11 +107,11 @@ def _add_title_page(doc: Document, meta: Metadata, work_type: str) -> None:
     _centered_line(doc, department, bold=True, font_size=sz)
 
     # Spacing
-    for _ in range(3):
+    for _ in range(2):
         _centered_line(doc, "", font_size=sz)
 
     # "ОТЧЕТ"
-    _centered_line(doc, "ОТЧЕТ", bold=True, font_size=Pt(14))
+    _centered_line(doc, "ОТЧЕТ", bold=True, font_size=Pt(16))
 
     # "по лабораторной работе №X"
     work_line = f"по {work_label}"
@@ -128,7 +129,7 @@ def _add_title_page(doc: Document, meta: Metadata, work_type: str) -> None:
                         space_before=Pt(6))
 
     # Spacing before author block
-    for _ in range(6):
+    for _ in range(3):
         _centered_line(doc, "", font_size=sz)
 
     left = Cm(10)
@@ -141,10 +142,9 @@ def _add_title_page(doc: Document, meta: Metadata, work_type: str) -> None:
 
     # Author name + signature line
     if author:
-        pad = "_" * max(1, 40 - len(author))
-        _right_block_line(doc, f"{author}{pad}   ______________", font_size=sz, left_indent=left)
+        _right_block_line(doc, f"{author}   ______________", font_size=sz, left_indent=left)
     else:
-        _right_block_line(doc, "_" * 40 + "   ______________", font_size=sz, left_indent=left)
+        _right_block_line(doc, "________________________________________   ______________", font_size=sz, left_indent=left)
 
     # Labels
     p = _right_block_line(doc, "", font_size=Pt(10), left_indent=left)
@@ -152,7 +152,6 @@ def _add_title_page(doc: Document, meta: Metadata, work_type: str) -> None:
     set_run_font(run, font_size=Pt(10))
 
     # Spacing
-    _right_block_line(doc, "", font_size=sz, left_indent=left)
     _right_block_line(doc, "", font_size=sz, left_indent=left)
 
     # "Руководитель:"
@@ -163,10 +162,9 @@ def _add_title_page(doc: Document, meta: Metadata, work_type: str) -> None:
 
     # Teacher name + signature line
     if teacher:
-        pad = "_" * max(1, 40 - len(teacher))
-        _right_block_line(doc, f"{teacher}{pad}   ______________", font_size=sz, left_indent=left)
+        _right_block_line(doc, f"{teacher}   ______________", font_size=sz, left_indent=left)
     else:
-        _right_block_line(doc, "_" * 40 + "   ______________", font_size=sz, left_indent=left)
+        _right_block_line(doc, "________________________________________   ______________", font_size=sz, left_indent=left)
 
     # Labels
     p = _right_block_line(doc, "", font_size=Pt(10), left_indent=left)
@@ -268,11 +266,26 @@ def _add_page_break(doc: Document) -> None:
 
 # --- Block rendering ---
 
-def _render_blocks(doc: Document, blocks: list[Block]) -> None:
+def _render_blocks(doc: Document, blocks: list[Block], number_headings: bool = True) -> None:
     """Render all blocks into the document."""
+    counters = [0, 0, 0]  # H1, H2, H3
     for block in blocks:
         if isinstance(block, HeadingBlock):
-            _render_heading(doc, block)
+            section_number = ""
+            if number_headings:
+                if block.level == 1:
+                    counters[0] += 1
+                    counters[1] = 0
+                    counters[2] = 0
+                    section_number = str(counters[0])
+                elif block.level == 2:
+                    counters[1] += 1
+                    counters[2] = 0
+                    section_number = f"{counters[0]}.{counters[1]}"
+                else:
+                    counters[2] += 1
+                    section_number = f"{counters[0]}.{counters[1]}.{counters[2]}"
+            _render_heading(doc, block, section_number=section_number)
         elif isinstance(block, ParagraphBlock):
             _render_paragraph(doc, block)
         elif isinstance(block, ListBlock):
@@ -281,30 +294,35 @@ def _render_blocks(doc: Document, blocks: list[Block]) -> None:
             _render_code_block(doc, block)
         elif isinstance(block, TableBlock):
             _render_table(doc, block)
+        elif isinstance(block, ImageBlock):
+            _render_image(doc, block)
+        elif isinstance(block, BlockquoteBlock):
+            _render_blockquote(doc, block)
 
 
-def _render_heading(doc: Document, block: HeadingBlock) -> None:
+def _render_heading(doc: Document, block: HeadingBlock, section_number: str = "") -> None:
     """Render heading with GOST formatting. H1: centered, bold, uppercase. H2+: bold, indented."""
     p = doc.add_paragraph()
+    prefix = f"{section_number} " if section_number else ""
     if block.level == 1:
         set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.CENTER,
                              first_line_indent=Cm(0),
                              space_before=Pt(24), space_after=Pt(12))
-        run = p.add_run(block.text.upper())
+        run = p.add_run(f"{prefix}{block.text.upper()}")
         set_run_font(run, font_size=Pt(14), bold=True)
         _set_heading_outline_level(p, 0)
     elif block.level == 2:
         set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.LEFT,
                              first_line_indent=PARAGRAPH_INDENT,
                              space_before=Pt(18), space_after=Pt(6))
-        run = p.add_run(block.text)
+        run = p.add_run(f"{prefix}{block.text}")
         set_run_font(run, font_size=Pt(14), bold=True)
         _set_heading_outline_level(p, 1)
     else:
         set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.LEFT,
                              first_line_indent=PARAGRAPH_INDENT,
                              space_before=Pt(12), space_after=Pt(6))
-        run = p.add_run(block.text)
+        run = p.add_run(f"{prefix}{block.text}")
         set_run_font(run, font_size=Pt(14), bold=True)
         _set_heading_outline_level(p, min(block.level - 1, 8))
 
@@ -353,15 +371,34 @@ def _render_list(doc: Document, block: ListBlock) -> None:
 
 def _render_code_block(doc: Document, block: CodeBlock) -> None:
     """Render a code block with monospace font and border."""
+    # Language label
+    if block.language:
+        lbl = doc.add_paragraph()
+        set_paragraph_format(lbl, alignment=WD_ALIGN_PARAGRAPH.LEFT,
+                             first_line_indent=Cm(0),
+                             space_before=Pt(6), space_after=Pt(0),
+                             line_spacing=1.0)
+        lbl.paragraph_format.left_indent = PARAGRAPH_INDENT
+        r = lbl.add_run(f"Листинг ({block.language}):")
+        set_run_font(r, font_size=Pt(10), italic=True)
+
     p = doc.add_paragraph()
     set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.LEFT,
                          first_line_indent=Cm(0),
-                         space_before=Pt(6), space_after=Pt(6),
+                         space_before=Pt(3) if block.language else Pt(6),
+                         space_after=Pt(6),
                          line_spacing=1.0)
     p.paragraph_format.left_indent = PARAGRAPH_INDENT
     _add_paragraph_border(p)
-    run = p.add_run(block.code)
-    set_run_font(run, font_name=CODE_FONT_NAME, font_size=CODE_FONT_SIZE)
+    _add_paragraph_shading(p, "F2F2F2")
+
+    # Split code into lines and use add_break() for proper line breaks
+    lines = block.code.split("\n")
+    for i, line in enumerate(lines):
+        run = p.add_run(line)
+        set_run_font(run, font_name=CODE_FONT_NAME, font_size=CODE_FONT_SIZE)
+        if i < len(lines) - 1:
+            run.add_break()
 
 
 def _add_paragraph_border(paragraph) -> None:
@@ -376,6 +413,16 @@ def _add_paragraph_border(paragraph) -> None:
         border.set(qn("w:color"), "808080")
         pBdr.append(border)
     pPr.append(pBdr)
+
+
+def _add_paragraph_shading(paragraph, color: str) -> None:
+    """Add background shading to a paragraph."""
+    pPr = paragraph._p.get_or_add_pPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), color)
+    pPr.append(shd)
 
 
 def _render_table(doc: Document, block: TableBlock) -> None:
@@ -409,6 +456,52 @@ def _render_table(doc: Document, block: TableBlock) -> None:
             run = p.add_run(cell_text)
             set_run_font(run, font_size=TABLE_FONT_SIZE)
         row_idx += 1
+
+
+def _render_image(doc: Document, block: ImageBlock) -> None:
+    """Render an image block. Downloads from URL if available."""
+    image_data = _download_image(block.url)
+    if image_data:
+        doc.add_picture(image_data, width=Cm(14))
+        last_para = doc.paragraphs[-1]
+        last_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    else:
+        p = doc.add_paragraph()
+        set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.CENTER, first_line_indent=Cm(0))
+        run = p.add_run(f"[Изображение: {block.alt or block.url}]")
+        set_run_font(run, italic=True)
+    if block.alt:
+        p = doc.add_paragraph()
+        set_paragraph_format(p, alignment=WD_ALIGN_PARAGRAPH.CENTER,
+                             first_line_indent=Cm(0),
+                             space_before=Pt(2), space_after=Pt(6))
+        run = p.add_run(block.alt)
+        set_run_font(run, font_size=Pt(12), italic=True)
+
+
+def _download_image(url: str) -> io.BytesIO | None:
+    """Try to download an image from URL. Returns BytesIO or None on failure."""
+    if not url or not url.startswith(("http://", "https://")):
+        return None
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read(5 * 1024 * 1024)  # max 5MB
+        return io.BytesIO(data)
+    except Exception:
+        return None
+
+
+def _render_blockquote(doc: Document, block: BlockquoteBlock) -> None:
+    """Render a blockquote with increased indent and italic."""
+    p = doc.add_paragraph()
+    set_paragraph_format(p, first_line_indent=Cm(0),
+                         space_before=Pt(6), space_after=Pt(6))
+    p.paragraph_format.left_indent = Cm(2)
+    for run_data in block.runs:
+        run = p.add_run(run_data.text)
+        set_run_font(run, italic=True, bold=run_data.bold)
 
 
 def _set_table_borders(table) -> None:

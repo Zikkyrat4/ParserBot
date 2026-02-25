@@ -50,7 +50,18 @@ class TableBlock:
     rows: List[List[str]] = field(default_factory=list)
 
 
-Block = HeadingBlock | ParagraphBlock | ListBlock | CodeBlock | TableBlock
+@dataclass
+class ImageBlock:
+    alt: str
+    url: str
+
+
+@dataclass
+class BlockquoteBlock:
+    runs: List[Run] = field(default_factory=list)
+
+
+Block = HeadingBlock | ParagraphBlock | ListBlock | CodeBlock | TableBlock | ImageBlock | BlockquoteBlock
 
 
 # --- Frontmatter extraction ---
@@ -78,7 +89,13 @@ def extract_frontmatter(text: str) -> tuple[Metadata, str]:
     m = _FRONTMATTER_RE.match(text)
     if not m:
         return Metadata(), text
-    raw = yaml.safe_load(m.group(1)) or {}
+    try:
+        raw = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(
+            f"Ошибка в YAML-заголовке документа: {e}\n"
+            "Проверьте формат YAML между маркерами ---."
+        ) from e
     meta = Metadata(
         title=str(raw.get("title", "")),
         author=str(raw.get("author", "")),
@@ -118,8 +135,15 @@ def _inline_to_runs(children: list) -> List[Run]:
                 r.italic = True
                 runs.append(r)
         elif tp == "link":
+            url = child.get("attrs", {}).get("url", "")
             for r in _inline_to_runs(child.get("children", [])):
                 runs.append(r)
+            if url:
+                runs.append(Run(text=f" ({url})"))
+        elif tp == "image":
+            alt = _extract_plain_text(child.get("children", []))
+            if alt:
+                runs.append(Run(text=f"[{alt}]"))
         elif tp == "softbreak" or tp == "linebreak":
             runs.append(Run(text="\n"))
         else:
@@ -180,11 +204,19 @@ def _walk_ast(tokens: list) -> List[Block]:
             blocks.append(HeadingBlock(level=level, text=text))
 
         elif tp == "paragraph":
-            runs = _inline_to_runs(token.get("children", []))
-            if runs:
-                blocks.append(ParagraphBlock(runs=runs))
+            children = token.get("children", [])
+            # Standalone image → ImageBlock
+            if len(children) == 1 and children[0].get("type") == "image":
+                img = children[0]
+                alt = _extract_plain_text(img.get("children", []))
+                url = img.get("attrs", {}).get("url", "")
+                blocks.append(ImageBlock(alt=alt, url=url))
+            else:
+                runs = _inline_to_runs(children)
+                if runs:
+                    blocks.append(ParagraphBlock(runs=runs))
 
-        elif tp == "code_block":
+        elif tp in ("code_block", "block_code"):
             info = token.get("attrs", {}).get("info", "") or ""
             raw = token.get("raw", token.get("text", ""))
             blocks.append(CodeBlock(language=info, code=raw.rstrip("\n")))
@@ -198,6 +230,22 @@ def _walk_ast(tokens: list) -> List[Block]:
             tbl = _parse_table(token)
             if tbl:
                 blocks.append(tbl)
+
+        elif tp == "block_quote":
+            quote_children = token.get("children", [])
+            runs: List[Run] = []
+            for child in quote_children:
+                child_tp = child.get("type", "")
+                if child_tp == "paragraph":
+                    if runs:
+                        runs.append(Run(text="\n"))
+                    runs.extend(_inline_to_runs(child.get("children", [])))
+                elif "children" in child:
+                    if runs:
+                        runs.append(Run(text="\n"))
+                    runs.extend(_inline_to_runs(child["children"]))
+            if runs:
+                blocks.append(BlockquoteBlock(runs=runs))
 
         elif tp == "thematic_break":
             pass  # skip horizontal rules
@@ -219,15 +267,18 @@ def _parse_table(token: dict) -> Optional[TableBlock]:
     for child in children:
         tp = child.get("type", "")
         if tp == "table_head":
-            for row in child.get("children", []):
-                for cell in row.get("children", []):
+            # mistune v3: table_head contains table_cell directly (no row wrapper)
+            for cell in child.get("children", []):
+                if cell.get("type") == "table_cell":
                     headers.append(_extract_plain_text(cell.get("children", [])))
         elif tp == "table_body":
             for row in child.get("children", []):
                 row_data = []
                 for cell in row.get("children", []):
-                    row_data.append(_extract_plain_text(cell.get("children", [])))
-                rows.append(row_data)
+                    if cell.get("type") == "table_cell":
+                        row_data.append(_extract_plain_text(cell.get("children", [])))
+                if row_data:
+                    rows.append(row_data)
     if headers or rows:
         return TableBlock(headers=headers, rows=rows)
     return None
@@ -238,7 +289,7 @@ def _parse_table(token: dict) -> Optional[TableBlock]:
 def parse_markdown(text: str) -> tuple[Metadata, List[Block]]:
     """Parse Markdown text into metadata and a list of typed blocks."""
     meta, body = extract_frontmatter(text)
-    md = mistune.create_markdown(renderer="ast")
+    md = mistune.create_markdown(renderer="ast", plugins=["table", "strikethrough"])
     ast = md(body)
     blocks = _walk_ast(ast)
     return meta, blocks
