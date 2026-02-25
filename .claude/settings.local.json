@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install -r requirements.txt 2>&1 | tail -5)",
+      "Bash(pip3 install -r /Users/zikkyrat/Projects/parserBot/requirements.txt 2>&1 | tail -10)",
+      "Bash(python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt 2>&1 | tail -10)",
+      "Bash(source venv/bin/activate && python3 -c \"\nfrom bot.converter import parse_markdown\nfrom bot.docx_builder import build_docx\n\n# Read example template\nwith open\\('bot/templates/example.md'\\) as f:\n    md = f.read\\(\\)\n\nmeta, blocks = parse_markdown\\(md\\)\nprint\\(f'Metadata: title={meta.title}, author={meta.author}, group={meta.group}'\\)\nprint\\(f'Blocks: {len\\(blocks\\)} total'\\)\nfor b in blocks[:5]:\n    print\\(f'  {type\\(b\\).__name__}: {str\\(b\\)[:80]}'\\)\n\n# Build DOCX\nbuf = build_docx\\(blocks, meta, 'lab'\\)\nprint\\(f'\\\\nDOCX size: {len\\(buf.getvalue\\(\\)\\)} bytes'\\)\n\n# Save for manual inspection\nwith open\\('/tmp/test_gost.docx', 'wb'\\) as f:\n    f.write\\(buf.getvalue\\(\\)\\)\nprint\\('Saved to /tmp/test_gost.docx'\\)\n\")",
+      "Bash(source venv/bin/activate && python3 -c \"from bot.main import main; print\\('bot.main imports OK'\\)\")",
+      "Bash(source venv/bin/activate && python -m bot.main 2>&1)",
+      "Bash(source venv/bin/activate && timeout 5 python -m bot.main 2>&1 || true)",
+      "Bash(source venv/bin/activate && gtimeout 5 python -m bot.main 2>&1; true)",
+      "Bash(source venv/bin/activate && python3 -c \"\nfrom docx import Document\n\ndoc = Document\\('/Users/zikkyrat/Downloads/lab1 \\(1\\).docx'\\)\n\nprint\\('=== PARAGRAPHS \\(first 60\\) ==='\\)\nfor i, p in enumerate\\(doc.paragraphs[:60]\\):\n    style = p.style.name if p.style else 'None'\n    align = str\\(p.alignment\\) if p.alignment is not None else 'None'\n    fmt = p.paragraph_format\n    indent = fmt.first_line_indent\n    left = fmt.left_indent\n    runs_info = []\n    for r in p.runs:\n        font = r.font\n        runs_info.append\\(f'[b={font.bold} i={font.italic} sz={font.size} name={font.name}] {repr\\(r.text[:80]\\)}'\\)\n    print\\(f'P{i}: style={style} align={align} indent={indent} left={left}'\\)\n    print\\(f'  text: {repr\\(p.text[:120]\\)}'\\)\n    for ri in runs_info:\n        print\\(f'  run: {ri}'\\)\n    print\\(\\)\n\")",
+      "Bash(source venv/bin/activate && python3 -c \"\nfrom docx import Document\n\ndoc = Document\\('/Users/zikkyrat/Downloads/lab1 \\(1\\).docx'\\)\n\nprint\\('=== PARAGRAPHS 40-80 ==='\\)\nfor i, p in enumerate\\(doc.paragraphs[40:80], start=40\\):\n    style = p.style.name if p.style else 'None'\n    align = str\\(p.alignment\\) if p.alignment is not None else 'None'\n    print\\(f'P{i}: style={style} align={align} text={repr\\(p.text[:120]\\)}'\\)\n    for r in p.runs:\n        print\\(f'  run: [b={r.font.bold} sz={r.font.size}] {repr\\(r.text[:80]\\)}'\\)\n    print\\(\\)\n\" 2>&1 | head -100)",
+      "Bash(source venv/bin/activate && python3 -c \"\nfrom bot.converter import parse_markdown\nfrom bot.docx_builder import build_docx\n\nwith open\\('bot/templates/example.md'\\) as f:\n    md = f.read\\(\\)\n\nmeta, blocks = parse_markdown\\(md\\)\n# Simulate bot filling in author/teacher\nmeta.author = 'Калинин Андрей Сергеевич'\nmeta.teacher = 'Кардакова Мария Владимировна'\n\nprint\\(f'Metadata: title={meta.title}, author={meta.author}'\\)\nprint\\(f'Blocks: {len\\(blocks\\)} total'\\)\n\nheadings = [b for b in blocks if hasattr\\(b, 'level'\\)]\nprint\\(f'Headings for TOC: {len\\(headings\\)}'\\)\nfor h in headings:\n    print\\(f'  H{h.level}: {h.text}'\\)\n\nbuf = build_docx\\(blocks, meta, 'lab'\\)\nprint\\(f'\\\\nDOCX size: {len\\(buf.getvalue\\(\\)\\)} bytes'\\)\n\nwith open\\('/tmp/test_gost2.docx', 'wb'\\) as f:\n    f.write\\(buf.getvalue\\(\\)\\)\nprint\\('Saved to /tmp/test_gost2.docx'\\)\n\")",
+      "Bash(source venv/bin/activate && python3 -c \"\nfrom bot.main import main\nprint\\('bot.main imports OK'\\)\n\n# Verify ConversationHandler structure\nfrom bot.main import ASK_WORK_TYPE, ASK_AUTHOR, ASK_TEACHER, GENERATE\nprint\\(f'States: ASK_WORK_TYPE={ASK_WORK_TYPE}, ASK_AUTHOR={ASK_AUTHOR}, ASK_TEACHER={ASK_TEACHER}'\\)\n\")",
+      "Bash(gh auth status 2>&1)",
+      "Bash(which git && git --version)",
+      "Bash(brew list gh 2>/dev/null || echo \"gh not installed\")",
+      "Bash(brew install gh 2>&1 | tail -5)"
+    ]
+  }
+}
