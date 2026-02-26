@@ -72,15 +72,27 @@ async def generate_report(text: str, work_type: str) -> str:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
 
-    client = genai.Client(api_key=api_key)
+    # Set proxy for Gemini requests if configured (for geo-restricted regions)
+    proxy_url = os.getenv("GEMINI_PROXY_URL")
+    if proxy_url:
+        os.environ["HTTPS_PROXY"] = proxy_url
+        os.environ["HTTP_PROXY"] = proxy_url
 
-    work_type_label = WORK_TYPE_LABELS.get(work_type, "Отчёт")
-    prompt = REPORT_PROMPT.format(work_type_label=work_type_label, text=text)
+    try:
+        client = genai.Client(api_key=api_key)
 
-    response = await client.aio.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
+        work_type_label = WORK_TYPE_LABELS.get(work_type, "Отчёт")
+        prompt = REPORT_PROMPT.format(work_type_label=work_type_label, text=text)
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+    finally:
+        # Remove proxy env vars so they don't affect Telegram API requests
+        if proxy_url:
+            os.environ.pop("HTTPS_PROXY", None)
+            os.environ.pop("HTTP_PROXY", None)
 
     if not response.text:
         raise ValueError("AI returned empty result")
