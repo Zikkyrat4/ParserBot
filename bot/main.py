@@ -23,6 +23,7 @@ from telegram.ext import (
 from bot.converter import parse_markdown, Metadata
 from bot.docx_builder import build_docx
 from bot.styles import WORK_TYPES
+from bot.ai_processor import extract_text, generate_report
 
 load_dotenv()
 logging.basicConfig(
@@ -35,7 +36,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
 
 # Conversation states
-EDIT_META, EDITING_FIELD = range(2)
+EDIT_META, EDITING_FIELD, REPORT_INPUT = range(3)
 
 # user_data keys
 KEY_MD_TEXT = "md_text"
@@ -130,6 +131,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "- текст в формате Markdown\n"
         "- файл .md или .txt\n\n"
         "Команды:\n"
+        "/report — генерация отчёта через AI\n"
         "/help — поддерживаемые возможности\n"
         "/template — пример шаблона отчёта\n"
         "/cancel — отмена текущей операции",
@@ -156,7 +158,10 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "subject: Программирование\n"
         "work_number: 1\n"
         "---\n\n"
-        "Поля, не заданные в frontmatter, можно заполнить через кнопки в боте."
+        "Поля, не заданные в frontmatter, можно заполнить через кнопки в боте.\n\n"
+        "Генерация отчёта через AI:\n"
+        "/report — отправьте любой материал (DOCX, PDF, TXT или текст),\n"
+        "и AI сгенерирует структурированный отчёт."
     )
 
 
@@ -338,6 +343,104 @@ async def field_text_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     return await _send_dashboard(update.message, context)
 
 
+# --- /report flow ---
+
+async def report_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for /report command."""
+    if not os.getenv("GEMINI_API_KEY"):
+        await update.message.reply_text(
+            "API ключ Gemini не настроен. Добавьте GEMINI_API_KEY в .env файл."
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "Отправьте файл (DOCX, PDF, TXT) или текст для генерации отчёта.\n\n"
+        "/cancel — отмена"
+    )
+    return REPORT_INPUT
+
+
+async def _process_report(text: str, message, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Common logic: validate text, call AI, parse result, show dashboard."""
+    if len(text.strip()) < 10:
+        await message.reply_text("Недостаточно материала для генерации отчёта (минимум 10 символов).")
+        return ConversationHandler.END
+
+    status_msg = await message.reply_text("Генерирую отчёт...")
+
+    try:
+        work_type = context.user_data.get(KEY_WORK_TYPE, "lab")
+        ai_markdown = await generate_report(text, work_type)
+    except RuntimeError as e:
+        await status_msg.edit_text(f"Ошибка: {e}")
+        return ConversationHandler.END
+    except Exception:
+        logger.exception("Gemini API error")
+        await status_msg.edit_text("Ошибка генерации, попробуйте позже.")
+        return ConversationHandler.END
+
+    if not ai_markdown.strip():
+        await status_msg.edit_text("Не удалось сгенерировать отчёт.")
+        return ConversationHandler.END
+
+    try:
+        metadata, blocks = parse_markdown(ai_markdown)
+    except ValueError as e:
+        await status_msg.edit_text(f"Ошибка разбора результата: {e}")
+        return ConversationHandler.END
+
+    if not blocks:
+        await status_msg.edit_text("Не удалось сгенерировать отчёт.")
+        return ConversationHandler.END
+
+    context.user_data[KEY_MD_TEXT] = ai_markdown
+    context.user_data[KEY_METADATA] = metadata
+    context.user_data[KEY_BLOCKS] = blocks
+    context.user_data.setdefault(KEY_WORK_TYPE, "lab")
+
+    await status_msg.edit_text("Отчёт сгенерирован!")
+    return await _send_dashboard(message, context)
+
+
+async def report_text_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle plain text sent after /report."""
+    return await _process_report(update.message.text, update.message, context)
+
+
+async def report_file_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle file sent after /report."""
+    doc = update.message.document
+    if not doc:
+        await update.message.reply_text("Отправьте файл или текст.")
+        return REPORT_INPUT
+
+    if doc.file_size and doc.file_size > MAX_FILE_SIZE:
+        await update.message.reply_text("Файл слишком большой (максимум 1 МБ).")
+        return REPORT_INPUT
+
+    name = doc.file_name or ""
+    name_lower = name.lower()
+    if not (name_lower.endswith(".docx") or name_lower.endswith(".pdf") or name_lower.endswith(".txt")):
+        await update.message.reply_text("Поддерживаются файлы .docx, .pdf, .txt.")
+        return REPORT_INPUT
+
+    file = await doc.get_file()
+    data = bytes(await file.download_as_bytearray())
+
+    try:
+        text = extract_text(data, name)
+    except Exception:
+        logger.exception("Text extraction error")
+        await update.message.reply_text("Не удалось извлечь текст из файла.")
+        return ConversationHandler.END
+
+    if not text.strip():
+        await update.message.reply_text("Не удалось извлечь текст из файла (возможно, это скан).")
+        return ConversationHandler.END
+
+    return await _process_report(text, update.message, context)
+
+
 # --- Generate ---
 
 async def _generate_and_send(message, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -403,6 +506,7 @@ def main() -> None:
 
     conv = ConversationHandler(
         entry_points=[
+            CommandHandler("report", report_start),
             MessageHandler(filters.Document.ALL, document_entry),
             MessageHandler(filters.TEXT & ~filters.COMMAND, text_entry),
         ],
@@ -412,6 +516,10 @@ def main() -> None:
             ],
             EDITING_FIELD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, field_text_received),
+            ],
+            REPORT_INPUT: [
+                MessageHandler(filters.Document.ALL, report_file_received),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, report_text_received),
             ],
         },
         fallbacks=[
